@@ -44,9 +44,9 @@ def rqi(A, M, v=None, s=0, k=2, eps=1e-4, maxiters=100, seed=0):
 
     @jit
     def papu(u):
-        pu = u - v@v.T@u
+        pu = u - v@(v.T@u)
         Apu = A@pu
-        pApu = Apu - v@v.T@Apu
+        pApu = Apu - v@(v.T@Apu)
         return pApu
 
     def py(u_k, w):
@@ -83,8 +83,9 @@ def rqi(A, M, v=None, s=0, k=2, eps=1e-4, maxiters=100, seed=0):
             
             s_k = (u_k.T@A@u_k).item()
             err = jnp.linalg.norm(papu(u_k) - s_k*u_k)
+            
             errs.append(err)
-            if i > 100 and errs[-1] < errs[-2]:
+            if i > 25 and errs[-1] < errs[-2]:
                 break
             
             i+=1
@@ -115,6 +116,7 @@ N = 10000
 p = 0.01
 graph = nx.erdos_renyi_graph(N, p)
 A = nx.laplacian_matrix(graph)
+del(graph)
 """
 # broken preconditioning
 def spiluprec(A):

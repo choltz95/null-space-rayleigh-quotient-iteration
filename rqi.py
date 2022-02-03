@@ -51,12 +51,9 @@ def rqi(A, M, v=None, s=0, k=2, eps=1e-4, maxiters=100, seed=0):
 
     def py(u_k, w):
         if len(w.shape) != 0:
-            c = C(u_k, w)
-            vw = jnp.concatenate([v,w],axis=1)
-            cvw = jnp.sum(vw * c.T,1)
-            cvw = jnp.expand_dims(cvw,1)
+            c, Aiu, Aivw = C(u_k, w)
+            Py = Aiu + jnp.expand_dims(jnp.sum(Aivw * c.T,1),1)
             
-            Py = Aspsolve(u_k + cvw)
         else:
             u_p = Aspsolve(u_k)
             c = -v.T@u_p/(v.T@v_1).item()
@@ -72,7 +69,7 @@ def rqi(A, M, v=None, s=0, k=2, eps=1e-4, maxiters=100, seed=0):
         Aivw = Aspsolve(vw)
         
         c = jnp.linalg.inv(vw.T@Aivw)@(-vw.T@Aiu)
-        return c
+        return c, Aiu, Aivw
     
     def _rqi(u_k, w=jnp.array(0)):
         s_k = (u_k.T@A@u_k).item()
@@ -143,8 +140,9 @@ I = sparse.BCOO.from_scipy_sparse(I)
 A = A+I
 
 t0 = time.time()
-U,S = rqi(A, s=0, eps=1e-2, M=M)
+U,S = rqi(A, s=0, eps=1e-3, M=M)
 rqitime = time.time() - t0
+print('rqi eigenvalues: ',jnp.round(S,3), 's: ', rqitime)
 
 # validate true eigenvalues
 def sorted_eig(A):
@@ -163,11 +161,9 @@ setuptime = time.time() - t0
 t0 = time.time()
 nw, nv = sorted_eig(pap)
 nptime = time.time() - t0
+print('np eigenvalues: ',jnp.round(nw[:3].real,3), 's: ', nptime+setuptime)
 
 t0 = time.time()
 sw, sv = scipy.linalg.eigh(pap)
 sptime = time.time() - t0
-
-print('rqi eigenvalues: ',jnp.round(S,3), 's: ', rqitime)
-print('np eigenvalues: ',jnp.round(nw[:3].real,3), 's: ', nptime+setuptime)
 print('sp eigenvalues: ',jnp.round(sw[:3].real,3), 's: ', sptime+setuptime)

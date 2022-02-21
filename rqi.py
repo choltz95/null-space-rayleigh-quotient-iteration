@@ -27,62 +27,88 @@ def rqi(A, M, v=None, s=0, k=2, eps=1e-4, maxiters=100, seed=0):
         S: smallest k eigenvalues of A."""
     key = jax.random.PRNGKey(seed)
     n = A.shape[0]
+    
+    #Initialize v to a unit vector
     if v == None:
         v = jnp.ones((n,1))/jnp.sqrt(n)
+        
     I = sp.identity(n)
     I = sparse.BCOO.from_scipy_sparse(I)
     s = 0.
     As = A - s*I
     _matvec = lambda x: As@x
     matvec = jit(_matvec)
-    u_0 = jax.random.normal(key, shape=(n,1))
+    u_0 = jax.random.normal(key, shape=(n,1))#?A randomly generated column?
     
+    '''
+    Solve Ax = b by conjugate gradient. Used for finding inverse of (A-sI) * u
+    '''
     def Aspsolve(b, **kwargs):
         return jax.scipy.sparse.linalg.cg(matvec, b, M=M, **kwargs)[0]
  
     v_1 = Aspsolve(v)
-
+    
+    '''
+    ?Calculating PAP*u_k that will be used to calculate the error
+    for ending the Rayleigh Quotient Iteration. P = I-v*v^T
+    
+    args:
+    u: the u_k, the k^th eigenvector of A?
+    '''
     @jit
     def papu(u):
-        pu = u - v@(v.T@u)
-        Apu = A@pu
-        pApu = Apu - v@(v.T@Apu)
+        pu = u - v@(v.T@u) #P*u = (I-v*v^T)*u = u-v*(v^T*u)
+        Apu = A@pu #AP*u_k
+        pApu = Apu - v@(v.T@Apu) #Plug in P= I-v*v^T
         return pApu
-
+    
+    '''
+    Solve P_yk
+    '''
     def py(u_k, w):
+        #Calculate eigenvectors after the first eigenvector
         if len(w.shape) != 0:
             c, Aiu, Aivw = C(u_k, w)
             Py = Aiu + jnp.expand_dims(jnp.sum(Aivw * c.T,1),1)
-            
+        
+        #Call Aspsolve to solve for P*y_k from P(A−sI)P*yk =uk−1
         else:
-            u_p = Aspsolve(u_k)
-            c = -v.T@u_p/(v.T@v_1).item()
+            u_p = Aspsolve(u_k) #u_p is u', find u' by solving u'*(A-sI)=u_(k-1)
+            c = -v.T@u_p/(v.T@v_1).item() #(9) in PAP.pdf
             
-            Py = u_p + c*v_1
+            Py = u_p + c*v_1 #(6) in PAP.pdf
         return Py
     
+    '''
+    Solve for c = [c1 c2]^T for solving P_yk
+    '''
     @jit
     def C(u_k, w):
         c = jnp.zeros(w.shape[1]+1)
-        vw = jnp.concatenate([v,w],axis=1)
-        Aiu = Aspsolve(u_k)
-        Aivw = Aspsolve(vw)
+        vw = jnp.concatenate([v,w],axis=1) #Construct [v, w] in (10)
+        Aiu = Aspsolve(u_k) #Compute (A-sI)^(-1)*u_k in (10) and store in Aiu
+        Aivw = Aspsolve(vw) #Compute (A-sI)^(-1)*[v w] in (10) and store in Aivw
         
-        c = jnp.linalg.inv(vw.T@Aivw)@(-vw.T@Aiu)
+        c = jnp.linalg.inv(vw.T@Aivw)@(-vw.T@Aiu) #c = ([v w]^T * Aivw)^(-1) * (-[v w]^T * Aiu)
         return c, Aiu, Aivw
     
+    '''
+    Solve eigenvectors of A by solving the eigenvectors of PAP?
+    '''
     def _rqi(u_k, w=jnp.array(0)):
-        s_k = (u_k.T@A@u_k).item()
-        err = jnp.linalg.norm(papu(u_k) - s_k*u_k)
+        s_k = (u_k.T@A@u_k).item() #s_k = u_k^T * A * u_k
+        err = jnp.linalg.norm(papu(u_k) - s_k*u_k) #Error term for convergence of Rayleigh Quotient iteration
         errs = [err]
         i = 0
+        
+        #Run Rayleigh Quotient iteration until ∥PAP*uk − sk*uk ∥ < ε or reach max iteration number
         while (err > eps) and (i < maxiters):
-            Py = py(u_k,w)
+            Py = py(u_k,w) #Calculate P*y_k by calling py
             
-            u_k = Py / jnp.linalg.norm(Py)
+            u_k = Py / jnp.linalg.norm(Py) #Calculate u_k = P*y_k/∥P*y_k∥
             
-            s_k = (u_k.T@A@u_k).item()
-            err = jnp.linalg.norm(papu(u_k) - s_k*u_k)
+            s_k = (u_k.T@A@u_k).item() #s_k = u_k^T*A*u_k
+            err = jnp.linalg.norm(papu(u_k) - s_k*u_k) #Calculate ∥PAP*uk − sk*uk ∥
             
             errs.append(err)
             if i > 25 and errs[-1] < errs[-2]:
@@ -95,8 +121,10 @@ def rqi(A, M, v=None, s=0, k=2, eps=1e-4, maxiters=100, seed=0):
     U = []
     w = []
     S = []
-    u,s = _rqi(u_0)
+    u,s = _rqi(u_0)#Why we need to run this on u_0
     i = 1
+    
+    #Calculate the first k eigenvectors
     while len(U) < k:
         _, key = jax.random.split(key)
         u_0 = jax.random.normal(key, shape=(n,1))
